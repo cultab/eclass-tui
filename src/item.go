@@ -66,6 +66,9 @@ func (i item) FilterValue() string { // TODO: keybinds to change this func to ot
 }
 
 func (i item) isExpired() bool {
+    if i.assignment.Deadline == nil {
+        return false
+    }
 	return i.assignment.Deadline.Before(time.Now())
 }
 
@@ -120,7 +123,12 @@ func (itemD itemDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		}
 	}
 
-	date += baseStyle.Render(i.assignment.Deadline.Format("02/01/2006 15:04:05"))
+    if i.assignment.Deadline == nil {
+        date += baseStyle.Render("Χωρίς Προθεσμία")
+    } else {
+        date += baseStyle.Render(i.assignment.Deadline.Format("02/01/2006 15:04:05"))
+    }
+
 
 	if i.hideReason != "" {
 		hideReason = baseStyle.Render("Κρυμένη γιατί είναι " + i.hideReason)

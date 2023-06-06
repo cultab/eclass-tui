@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 
 	"github.com/Huray-hub/eclass-utils/assignment/config"
@@ -14,11 +16,12 @@ import (
 )
 
 type form struct {
-	fields        []textinput.Model
-	style         lip.Style
-	selectedInput int
-	conf       config.Config
-	loginFailed   int
+	fields          []textinput.Model
+	style           lip.Style
+	selectedInput   int
+	conf            config.Config
+	loginFailed     int
+	loginFailReason string
 }
 
 const (
@@ -100,7 +103,7 @@ func NewForm(conf config.Config) form {
 	username.Prompt = "Username: "
 	username.SetValue(conf.Credentials.Username)
 	username.Validate = validateUsername
-    username.Placeholder = " Όνομα χρήστη (Username)" // BUG: without space before 'Ό', garbage is printed
+	username.Placeholder = " Όνομα χρήστη (Username)" // BUG: without space before 'Ό', garbage is printed
 
 	password := textinput.New()
 	password.Prompt = "Password: "
@@ -108,7 +111,7 @@ func NewForm(conf config.Config) form {
 	password.Validate = validatePassword
 	password.EchoCharacter = '*'
 	password.EchoMode = textinput.EchoPassword
-    password.Placeholder = " Συνθηματικό (Password)" // BUG: without space before 'Σ', garbage is printed
+	password.Placeholder = " Συνθηματικό (Password)" // BUG: without space before 'Σ', garbage is printed
 
 	domain := textinput.New()
 	domain.Validate = validateDomain
@@ -124,7 +127,7 @@ func NewForm(conf config.Config) form {
 		},
 		style:         defaultFormStyle,
 		selectedInput: 0,
-        conf: conf,
+		conf:          conf,
 	}
 }
 
@@ -158,18 +161,22 @@ func (f form) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		f.style.Height(msg.Height)
 		f.style.Width(msg.Width)
-    case loginSuccess:
-        log.Println("Login success!")
+	case loginSuccess:
+		log.Println("Login success!")
 	case loginFail:
 		f.loginFailed++
-		log.Println("Login failed!")
+		f.loginFailReason = msg.reason
+		log.Println(msg.Err)
 	}
 
 	cmd = f.updateFields(msg)
 	return f, cmd
 }
 
-type loginFail struct{ Err error }
+type loginFail struct {
+	Err    error
+	reason string
+}
 
 func (l loginFail) Error() string {
 	return l.Err.Error()
@@ -183,27 +190,44 @@ func startSpinnerCmd() tea.Msg {
 
 func (f *form) loginCmd() tea.Msg {
 
-    // update config
+	// update config
 	f.conf.Credentials = auth.Credentials{
 		Username: f.fields[Username].Value(),
 		Password: f.fields[Password].Value(),
 	}
-    f.conf.Options.BaseDomain = f.fields[Domain].Value()
+	f.conf.Options.BaseDomain = f.fields[Domain].Value()
 
 	client, err := auth.Session(
 		context.Background(),
 		"https://"+f.fields[Domain].Value(),
 		f.conf.Credentials,
 		nil,
-    )
-	if err != nil || client == nil {
-		return loginFail{fmt.Errorf("login failed: %v", err)}
+	)
+
+	if err != nil {
+        var errInvalidDomain auth.ErrInvalidDomain
+        var errUrlError *url.Error
+        log.Printf("%T", err)
+		switch {
+		case errors.Is(err, auth.ErrNoCredentials):
+			return loginFail{fmt.Errorf("login failed: %w", err), "Δεν δώθηκε password ή username"}
+		case errors.Is(err, auth.ErrInvalidCredentials): log.Print("invalid creds")
+			return loginFail{fmt.Errorf("login failed: %w", err), "Λάθος username ή password"}
+        case errors.As(err, &errUrlError):
+            return loginFail{fmt.Errorf("login failed: %w", err), "Λάθος domain"}
+		case errors.Is(err, &errInvalidDomain):
+			return loginFail{fmt.Errorf("login failed: %w", err), "Λάθος domain"}
+		}
+	}
+
+	if client == nil {
+		return loginFail{fmt.Errorf("login failed client: %v", err), "??unexpected login failure"}
 	}
 
 	return loginSuccess{
-        conf: f.conf,
-        session: client,
-    }
+		conf:    f.conf,
+		session: client,
+	}
 }
 
 func (f *form) updateFields(msg tea.Msg) tea.Cmd {
@@ -212,13 +236,12 @@ func (f *form) updateFields(msg tea.Msg) tea.Cmd {
 	for i, field := range f.fields {
 		if i == f.selectedInput {
 			field.Focus()
-            field.SetValue(field.Value()) // HACK: yes
+			field.SetValue(field.Value()) // HACK: yes
 		} else {
 			field.Blur()
 		}
 		f.fields[i], cmds[i] = field.Update(msg)
 	}
-
 
 	return tea.Batch(cmds...)
 }
@@ -247,9 +270,9 @@ func (f form) View() string {
 
 	var loginFailed_msg string
 	if f.loginFailed == 1 {
-		loginFailed_msg = "Failed to login!"
+		loginFailed_msg = "Failed to login: " + f.loginFailReason
 	} else if f.loginFailed > 1 {
-		loginFailed_msg = fmt.Sprintf("Failed to login(%d)!", f.loginFailed-1)
+		loginFailed_msg = fmt.Sprintf("Failed to login(%d): %s", f.loginFailed-1, f.loginFailReason)
 
 	}
 	warnings = append(warnings, warningStyle.Render(loginFailed_msg))

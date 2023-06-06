@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Huray-hub/eclass-utils/assignment"
@@ -18,6 +20,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	lip "github.com/charmbracelet/lipgloss"
 )
+
+var configPath string
+
+func Init() {
+    configPath, err := os.UserConfigDir()
+	configPath = filepath.Join(configPath, "eclass-utils", "config.yaml")
+    _ = configPath // HACK: used later, it's a global
+    if err != nil {
+        log.Panic(err)
+    }
+}
 
 type courseList struct {
 	list       list.Model
@@ -69,11 +82,11 @@ func newKeyBinds() keyBinds {
 	return keyBinds{
 		toggleHideAssignment: key.NewBinding(
 			key.WithKeys("c", "ψ"),
-			key.WithHelp("c|ψ", "Κρύψε εργασία"),
+			key.WithHelp("c", "Κρύψε εργασία"),
 		),
 		toggleHideCourse: key.NewBinding(
 			key.WithKeys("x", "θ"),
-			key.WithHelp("x|θ", "Κρύψε μάθημα"),
+			key.WithHelp("x", "Κρύψε μάθημα"),
 		),
 		toggleHidden: key.NewBinding(
 			key.WithKeys(tea.KeySpace.String()),
@@ -81,11 +94,11 @@ func newKeyBinds() keyBinds {
 		),
 		saveConfig: key.NewBinding(
 			key.WithKeys("s", "σ"),
-			key.WithHelp("s|σ", "Αποθήκευση"),
+			key.WithHelp("s", "Αποθήκευση"),
 		),
 		toggleIncludeExpired: key.NewBinding(
 			key.WithKeys("i", "ι"),
-			key.WithHelp("i|ι", "Συμπερήληψη εκπρόθεσμων"),
+			key.WithHelp("i", "Συμπερήληψη εκπρόθεσμων"),
 		),
 	}
 }
@@ -106,13 +119,15 @@ func (cl courseList) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, cl.keys.saveConfig):
-			// TODO: this
-
-			// err := config.Export(m.config.Options, m.config.Credentials)
-			// if err != nil {
-			// 	return m, errorCmd(err)
-			// }
-			cmd := cl.list.NewStatusMessage("Αποθηκέυση επιτυχής! (not really)")
+            conf := config.Config{
+                Credentials: cl.config.Credentials,
+                Options: cl.config.Options,
+            }
+			err := config.Export(configPath, conf, true)
+			if err != nil {
+				return cl, errorCmd(err)
+			}
+			cmd := cl.list.NewStatusMessage("Αποθηκέυση επιτυχής!")
 			return cl, cmd
 		case key.Matches(msg, cl.keys.toggleHideAssignment):
 			i, ok := cl.list.SelectedItem().(item)
@@ -236,7 +251,7 @@ func (e errorMsg) Error() string { return e.err.Error() }
 func getAssignments(service assignment.Service) tea.Msg {
 	a, err := service.FetchAssignments(context.Background())
 	if err != nil {
-        return errorMsg{fmt.Errorf("error getting assignments: %v", err.Error())}
+        return errorMsg{fmt.Errorf("error getting assignments: %w", err)}
 	}
 
 	var items = make([]list.Item, len(a))
@@ -293,6 +308,8 @@ func getAllAssignments(session http.Client, creds auth.Credentials, domain strin
 }
 
 func mockGetAssignments() tea.Msg {
+    now := time.Now()
+    later := time.Now().Add(time.Hour)
 	a := []assignment.Assignment{ // {{{
 		{
 			ID: "A1",
@@ -302,7 +319,7 @@ func mockGetAssignments() tea.Msg {
 				URL:  "https://some.random.url",
 			},
 			Title:    "Course #1",
-			Deadline: time.Now(),
+			Deadline: &now,
 			IsSent:   true,
 		},
 		{
@@ -313,7 +330,7 @@ func mockGetAssignments() tea.Msg {
 				URL:  "https://some.random.url",
 			},
 			Title:    "Course #2",
-			Deadline: time.Now(),
+			Deadline: &now,
 			IsSent:   false,
 		},
 		{
@@ -324,7 +341,7 @@ func mockGetAssignments() tea.Msg {
 				URL:  "https://some.random.url",
 			},
 			Title:    "Course #3",
-			Deadline: time.Now().Add(time.Hour),
+			Deadline: &later,
 			IsSent:   false,
 		},
 	} // }}}
