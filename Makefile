@@ -1,5 +1,4 @@
 GOFLAGS = -v
-RUNFLAGS =
 
 PREFIX = /usr/local/
 
@@ -23,7 +22,7 @@ clean:
 	rm -f ./eclass-tui ./tidy
 
 run: build
-	./eclass-tui $(RUNFLAGS)
+	./eclass-tui
 
 install: build
 	@echo "Installing into $(DESTDIR)$(PREFIX)bin/.."
